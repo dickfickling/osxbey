@@ -1,0 +1,211 @@
+#!/usr/bin/env python
+#
+# osxbey [version 0.1-1]
+# Maintained by Dick Fickling <dick@fickling.us>
+#
+# Based on Archbey:
+# Maintained by Melik Manukyan <melik@archlinux.us>
+# Distributed under the terms of the GNU General Public License v3.
+# See http://www.gnu.org/licenses/gpl.txt for the full license text.
+# Modified for ArchBang -sHyLoCk
+#
+# System information tool for OSX written in python.
+
+# Import libraries
+import os, sys, subprocess, optparse, re
+from subprocess import Popen, PIPE
+from optparse import OptionParser
+from getpass import getuser
+from time import ctime, sleep
+
+# Display [Comment/Uncomment to Enable/Disable information.]
+display = [
+ 'os', # Display Operating System
+ 'version',  # Display OS Version
+ 'hostname', # Display Machine Hostname
+ 'battery', # Display Battery Usage [Requires 'acpi']
+ 'uptime',  # Display System Uptime
+ #'ram', # Display RAM Usage
+ 'cpu', # Display CPU Model
+ 'sh', # Display Current Shell
+# 'fs:/boot', # Display /boot Partition Usage
+# 'fs:/home', # Display /home Partition Usage
+# 'fs:/MOUNT/POINT', # Display * Partition, Edit To Your Needs
+ #'fs:/' # Display / Partition Usage
+ ]
+# Array containing Values
+result = []
+
+# Options
+if __name__=='__main__':
+ parser = OptionParser(usage='%prog [-c COLOR] [-s, --screenshot]', description='To customize the info displayed on archey, edit "/usr/bin/archey" directly and look for the display array. Note: Archey can only allow up to 15 fields.', version="%prog 0.1.11")
+ parser.add_option('-c',
+  action='store', default='blue', type='choice', dest='color', choices=('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'), help='choose a color: black, red, green, yellow, blue, magenta, cyan, white [Default: blue]')
+ parser.add_option('-s', '--screenshot',
+  action='store_true', dest='screenshot', help='take a screenshot')
+ (options, args) = parser.parse_args()
+
+# Define colors
+colorscheme = '%s' % options.color
+colors = {'black': '0', 'red': '1', 'green': '2', 'yellow': '3', 'blue': '4', 'magenta': '5', 'cyan': '6', 'white': '7'}
+for key in colors.keys():
+ if key in colorscheme: colorcode = colors[key]    
+color = '\x1b[1;3%sm' % colorcode
+color2 = '\x1b[0;3%sm' % colorcode
+clear = '\x1b[0m'
+
+# Define processes for identifying Desktop Environmentss, Window Managers, Shells.
+sh_dict = {
+ 'zsh': 'Zsh',
+ 'bash': 'Bash',
+ 'dash': 'Dash',
+ 'fish': 'Fish',
+ 'ksh': 'Ksh',
+ 'csh': 'Csh',
+ 'jsh': 'Jsh',
+ 'tcsh': 'Tcsh'}
+
+# Find running processes.
+def xmonadfix(str):
+ if re.compile("xmonad").match(str): return "xmonad"
+ return str
+p1 = Popen(['ps', '-u', getuser()], stdout=PIPE).communicate()[0].split('\n')
+processes = map(xmonadfix, [process.split()[3] for process in p1 if process])
+p1 = None
+
+# Print coloured key with normal value.
+def output(key, value):
+ output = '%s%s:%s %s' % (color, key, clear, value)
+ result.append(output)
+
+# RAM Function
+def ram_display():
+ raminfo = Popen(['free', '-m'], stdout=PIPE).communicate()[0].split('\n')
+ ram = ''.join(filter(re.compile('M').search, raminfo)).split()
+ used = int(ram[2]) - int(ram[5]) - int(ram[6])
+ output ('RAM', '%s MB / %s MB' % (used, ram[1]))
+
+# Screenshot Function 
+screen = '%s' % options.screenshot
+def screenshot():
+ print 'Taking shot in',
+ list = range(1,6)
+ list.reverse()
+ for x in list:
+   print '%s..' % x,
+   sys.stdout.flush()
+   sleep(1)
+ print 'Say Cheeze!'
+ subprocess.check_call(['scrot'])
+
+# Operating System Function
+def os_display(): 
+ arch = os.uname()[4]
+ osname = 'Mac OS X %s' % (arch)
+ output('OS', osname)
+
+# Version Function
+def version_display():
+ vers = Popen(['sw_vers'], stdout=PIPE).communicate()[0].rstrip('\n')
+ verstr = 'ProductVersion:\t'
+ buistr = 'BuildVersion:\t'
+ version = vers[(str.find(vers,verstr)+len(verstr)):str.find(vers,buistr)].rstrip('\n')
+ output ('Version', version)
+
+# Hostname Function
+def hostname_display():
+ hostname = os.uname()[1].rstrip('.home.')
+ output ('Hostname', hostname)
+
+# CPU Function
+def cpu_display():
+ cpuinfo = Popen(['sysctl', '-n', 'machdep.cpu.brand_string'], stdout=PIPE).communicate()[0].rstrip('\n') 
+ output ('CPU', cpuinfo) 
+
+# Uptime Function
+def uptime_display():
+ p1 = Popen(['uptime'], stdout=PIPE).communicate()[0].rstrip('\n')
+ time = p1[str.find(p1, 'up'):str.find(p1, 'users')-4]
+ output('Uptime', time)
+
+# Battery Function [Requires: acpi]
+def battery_display(): 
+ p1 = Popen(['pmset', '-g', 'batt'], stdout=PIPE).communicate()[0].rstrip('\n').split(' ')
+ perc = p1[5]
+ perc = perc[str.rfind(perc, '\t')+1:-1]
+ time = p1[7]
+ battery = str(time) + ' (' + str(perc) + ') remaining'
+ output ('Battery', battery)
+
+# Shell Function
+def sh_display():
+ sh = os.getenv("SHELL").split('/')[-1].capitalize()
+ output ('Shell', sh)
+
+# File System Function
+def fs_display(mount=''):
+ p1 = Popen(['df', '-TPh', mount], stdout=PIPE).communicate()[0]
+ used = [line for line in p1.split('\n') if line][1]
+ used = used.split()[3]
+ total = [line for line in p1.split('\n') if line][1]
+ total = total.split()[2]
+ type = [line for line in p1.split('\n') if line][1]
+ type = type.split()[1]
+ if mount == '/': mount = '/root'
+ fs = mount.rpartition('/')[2].title() + " FS"
+ part = '%s / %s (%s)' % (used, total, type)
+ output (fs, part)
+
+# Run functions found in 'display' array.
+for x in display:
+ call = [arg for arg in x.split(':') if arg]
+ funcname=call[0] + '_display'
+ func=locals()[funcname]
+ if len(call) > 1:
+  func(arg)
+ else:
+  func()
+
+# Array containing values.
+result.extend(['']*(16 - len(display)))
+
+###### Result #######
+print """%s
+%s                         #                 
+%s                        ##                  
+%s                       ###                  
+%s                       ##                   
+%s            #######    #   #######        %s  
+%s         ############   #############     %s  
+%s      #################################   %s  
+%s    #################################     %s  
+%s   ################################       %s  
+%s  ################################        %s  
+%s  ################################        %s  
+%s  #################################       %s  
+%s  ###################################     %s  
+%s   #####################################  %s  
+%s   #####################################  %s  
+%s    ###################################   %s  
+%s     #################################    %s  
+%s       ##############################     %s  
+%s         ###########     #########        %s  
+%s """ % (color, color, color, color, color, color, 
+        result[0], color, 
+        result[1], color,
+        result[2], color,
+        result[3], color,
+        result[4], color,
+        result[5], color,
+        result[6], color,
+        result[7], color,
+        result[8], color,
+        result[9], color,
+        result[10], color,
+        result[11], color,
+        result[12], color,
+        result[13], color,
+        result[14], clear)
+
+if screen == 'True':
+ screenshot()
